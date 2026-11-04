@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1TB NVMe SSD price tracker</title>
+<meta name="description" content="Daily price checks of name-brand 1TB NVMe SSDs at US retailers.">
+<style>
+  :root {
+    --bg: #faf9f5; --panel: #ffffff; --fg: #1f1e1d; --muted: #6b6a65; --line: #e6e3da;
+    --accent: #c96442; --ok: #2f7d4f; --grid: #eeebe3;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1d1c1a; --panel: #262523; --fg: #f2f0ea; --muted: #a29f97; --line: #3a3835; --accent: #e08a6a; --ok: #6cc28f; --grid: #33312e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); line-height: 1.45; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 20px 48px; display: flex; flex-direction: column; gap: 24px; }
+  h1 { font-family: var(--serif); font-weight: 400; font-size: 2rem; margin: 0; }
+  .take { margin: 6px 0 0; color: var(--muted); }
+  .take b { color: var(--fg); }
+  .buy { display: inline-block; margin-top: 12px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); text-decoration: none; font-size: .9rem; }
+  .buy:hover { border-color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  .label { margin: 0; font-size: .8rem; color: var(--muted); }
+  .big { margin: 6px 0; font-family: var(--serif); font-size: 1.9rem; font-variant-numeric: tabular-nums; }
+  .sub { margin: 0; font-size: .8rem; color: var(--muted); }
+  .sub.ok { color: var(--ok); }
+  h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+  .note { margin: 4px 0 14px; font-size: .8rem; color: var(--muted); }
+  .chart { position: relative; min-height: 240px; }
+  .chart svg { display: block; width: 100%; height: auto; }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: 6px 10px; font-size: .8rem; white-space: nowrap; }
+  .tip .d { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: .8rem; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .num { text-align: right; }
+  tr.best td { font-weight: 600; }
+  td a { color: inherit; text-underline-offset: 2px; }
+  td a::after { content: " \2197"; color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  footer { font-size: .8rem; color: var(--muted); }
+  .err { color: var(--muted); text-align: center; padding: 80px 0; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>1TB NVMe SSD price tracker</h1>
+    <p class="take">Name-brand drives only, checked daily. Cheapest today: <b id="best-price">—</b> for the <b id="best-drive">—</b> at <b id="best-retailer">—</b>.</p>
+    <a class="buy" id="best-link" target="_blank" rel="noopener noreferrer" hidden>View the cheapest deal ↗</a>
+  </header>
+
+  <section class="tiles">
+    <div class="card"><p class="label">Lowest price, latest check</p><p class="big" id="t-today">—</p><p class="sub" id="t-today-sub">—</p></div>
+    <div class="card"><p class="label">Lowest price ever tracked</p><p class="big" id="t-low">—</p><p class="sub" id="t-low-sub">—</p></div>
+    <div class="card"><p class="label">Deal target</p><p class="big" id="t-target">—</p><p class="sub" id="t-target-sub">—</p></div>
+    <div class="card"><p class="label">Days tracked</p><p class="big" id="t-days">—</p><p class="sub">Since Nov 3, 2026</p></div>
+  </section>
+
+  <section class="card">
+    <h2>Cheapest name-brand price by day</h2>
+    <p class="note">Lowest price found on each daily check. The dashed line is the deal target.</p>
+    <div class="chart" id="chart"></div>
+  </section>
+
+  <section class="card">
+    <h2>Prices at the latest check</h2>
+    <p class="note">Every name-brand 1TB NVMe drive found, cheapest first. Click a drive to open its listing.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Drive</th><th>PCIe</th><th>Retailer</th><th class="num">Price</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>Prices are gathered once a day from public deal trackers and retailer listings, so they can lag flash sales. Always confirm the price at checkout. Data: <a href="prices.json">prices.json</a>.</footer>
+</main>
+
+<script>
+(() => {
+  const TARGET = 140;
+  const usd = (v) => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const toDate = (s) => new Date(String(s).slice(0, 10) + 'T00:00:00Z');
+  const fmtDate = (s, long = true) => toDate(s).toLocaleDateString('en-US', long ? { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' } : { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const safeUrl = (u) => typeof u === 'string' && /^https:\/\/[^\s]+$/i.test(u);
+  const $ = (id) => document.getElementById(id);
+  let daily = [];
+
+  function render(prices) {
+    const rows = prices.map((r) => ({ ...r, price: Number(r.price), date: String(r.date).slice(0, 10) }));
+    const dates = [...new Set(rows.map((r) => r.date))].sort();
+    const latestDate = dates[dates.length - 1];
+    const latest = rows.filter((r) => r.date === latestDate).sort((a, b) => a.price - b.price);
+    const today = latest[0];
+    const best = rows.slice().sort((a, b) => a.price - b.price || a.date.localeCompare(b.date))[0];
+
+    $('best-price').textContent = usd(today.price);
+    $('best-drive').textContent = today.drive;
+    $('best-retailer').textContent = today.retailer;
+    if (safeUrl(today.url)) {
+      const a = $('best-link');
+      a.href = today.url;
+      a.textContent = 'View the cheapest deal at ' + today.retailer + ' ↗';
+      a.hidden = false;
+    }
+    $('t-today').textContent = usd(today.price);
+    $('t-today-sub').textContent = 'Checked ' + fmtDate(latestDate);
+    $('t-low').textContent = usd(best.price);
+    $('t-low-sub').textContent = best.drive + ', ' + best.retailer + ', ' + fmtDate(best.date);
+    $('t-target').textContent = usd(TARGET);
+    const gap = today.price - TARGET;
+    const ts = $('t-target-sub');
+    ts.textContent = gap <= 0 ? 'At or under target now' : usd(gap) + ' above target';
+    ts.classList.toggle('ok', gap <= 0);
+    $('t-days').textContent = dates.length.toLocaleString('en-US');
+
+    const tbody = $('rows');
+    tbody.replaceChildren();
+    latest.forEach((r, i) => {
+      const tr = document.createElement('tr');
+      if (i === 0) tr.className = 'best';
+      [r.drive, r.gen, r.retailer, usd(r.price)].forEach((t, j) => {
+        const td = document.createElement('td');
+        if (j === 0 && safeUrl(r.url)) {
+          const a = document.createElement('a');
+          a.href = r.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = t;
+          td.appendChild(a);
+        } else td.textContent = t;
+        if (j === 3) td.className = 'num';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    daily = dates.map((d) => {
+      const b = rows.filter((r) => r.date === d).sort((a, c) => a.price - c.price)[0];
+      return { date: d, low: b.price, drive: b.drive, retailer: b.retailer };
+    });
+    drawChart();
+  }
+
+  function drawChart() {
+    const el = $('chart');
+    el.replaceChildren();
+    if (!daily.length) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const W = Math.max(280, el.clientWidth || 600), H = 240;
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    el.appendChild(svg);
+    const mk = (tag, attrs, text) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; svg.appendChild(n); return n; };
+    const cs = getComputedStyle(document.documentElement);
+    const c = (v) => cs.getPropertyValue(v).trim();
+
+    let lo = Math.min(TARGET, ...daily.map((d) => d.low)) - 10;
+    let hi = Math.max(TARGET, ...daily.map((d) => d.low)) + 10;
+    const step = [5, 10, 20, 25, 50, 100].find((s) => (hi - lo) / s <= 6) || 200;
+    lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+    const ticks = [];
+    for (let v = lo; v <= hi; v += step) ticks.push(v);
+    const top = 12, bottom = H - 28;
+    const y = (v) => bottom - (v - lo) / (hi - lo) * (bottom - top);
+
+    const probe = mk('text', { 'font-size': 12 }, '$' + Math.round(hi).toLocaleString('en-US'));
+    const ml = probe.getComputedTextLength() + 12; probe.remove();
+    const mr = 24, left = ml + 20, right = W - mr;
+    const t0 = toDate(daily[0].date).getTime(), t1 = toDate(daily[daily.length - 1].date).getTime();
+    const x = (d) => daily.length === 1 ? (left + right) / 2 : left + (toDate(d).getTime() - t0) / (t1 - t0) * (right - left);
+
+    ticks.forEach((v) => {
+      mk('line', { x1: ml, x2: right, y1: y(v), y2: y(v), stroke: c('--grid') });
+      mk('text', { x: ml - 6, y: y(v), dy: '0.32em', 'text-anchor': 'end', 'font-size': 12, fill: c('--muted') }, '$' + Math.round(v).toLocaleString('en-US'));
+    });
+    const maxLabels = Math.max(2, Math.floor((right - left) / 70));
+    const every = Math.ceil(daily.length / maxLabels);
+    daily.forEach((d, i) => {
+      const last = daily.length - 1;
+      const show = (i % every === 0 && last - i >= Math.ceil(every / 2)) || i === last;
+      if (show) {
+        mk('text', { x: x(d.date), y: H - 8, 'text-anchor': 'middle', 'font-size': 12, fill: c('--muted') }, fmtDate(d.date, false));
+      }
+    });
+    mk('line', { x1: ml, x2: right, y1: y(TARGET), y2: y(TARGET), stroke: c('--muted'), 'stroke-dasharray': '4 4' });
+    mk('text', { x: right, y: y(TARGET) + 16, 'text-anchor': 'end', 'font-size': 12, fill: c('--muted') }, 'Target $' + TARGET);
+    if (daily.length > 1) {
+      mk('path', { d: daily.map((d, i) => (i ? 'L' : 'M') + x(d.date) + ',' + y(d.low)).join(''), fill: 'none', stroke: c('--accent'), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+    }
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; el.appendChild(tip);
+    daily.forEach((d) => {
+      const dot = mk('circle', { cx: x(d.date), cy: y(d.low), r: 5, fill: c('--accent') });
+      dot.addEventListener('pointerenter', () => {
+        tip.replaceChildren();
+        const a = document.createElement('div'); a.className = 'd'; a.textContent = fmtDate(d.date);
+        const b = document.createElement('div'); b.textContent = usd(d.low) + ' · ' + d.drive + ' (' + d.retailer + ')';
+        tip.append(a, b); tip.hidden = false;
+        const s = el.clientWidth / W;
+        const px = x(d.date) * s, py = y(d.low) * s;
+        tip.style.left = Math.min(Math.max(0, px - tip.offsetWidth / 2), el.clientWidth - tip.offsetWidth) + 'px';
+        tip.style.top = Math.max(0, py - tip.offsetHeight - 10) + 'px';
+      });
+      dot.addEventListener('pointerleave', () => { tip.hidden = true; });
+    });
+  }
+
+  fetch('prices.json', { cache: 'no-store' })
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(render)
+    .catch(() => { $('chart').innerHTML = '<p class="err">Couldn’t load prices.json.</p>'; });
+  let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(drawChart, 150); });
+})();
+</script>
+</body>
+</html>
